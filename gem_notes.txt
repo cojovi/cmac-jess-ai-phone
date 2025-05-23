@@ -1,0 +1,18 @@
+Key changes in this version:
+
+Imported WebSocketState from starlette.websockets.
+Added a very visible print(f"--- /recording-status-callback HIT --- {datetime.datetime.now()}") at the start of the recording_status_callback function.
+Refined the handle_media_stream function:
+Introduced an active_tasks flag to help coordinate the shutdown of receive_from_twilio and send_to_twilio tasks.
+The receive_from_twilio task now breaks its loop and sets active_tasks = False upon Twilio's stop event or WebSocketDisconnect.
+The send_to_twilio task uses a non-blocking asyncio.wait_for with a short timeout for openai_ws.recv() to allow it to periodically check the active_tasks flag and exit gracefully if needed. It also handles session.closed from OpenAI.
+The main finally block in handle_media_stream is now the primary responsible party for closing the Twilio websocket if it's still connected, using websocket.client_state == WebSocketState.CONNECTED.
+Removed explicit openai_ws.close() from sub-tasks' finally blocks as async with manages it.
+Added more logging prefixes like [BG Task {call_sid}] and [{client_info}] to make logs easier to trace.
+Added ws_ping_interval=None, ws_ping_timeout=None to uvicorn.run as sometimes default ping intervals can cause premature WebSocket closures with services like Twilio Media Streams if not handled by both ends; this disables Uvicorn's own WebSocket keepalive pings, relying on Twilio/OpenAI's mechanisms. You can experiment with these settings if WebSocket stability is an issue.
+After applying these changes and critically, after verifying your Twilio phone number's recording and status callback settings in the Twilio console, please try an inbound call again. Carefully watch the console logs for:
+
+The "--- /recording-status-callback HIT ---" message.
+Any "[BG Task ...]" messages related to downloading, transcribing, and summarizing.
+The final "Summary saved to ..." message.
+If the recording callback is still not hit for inbound calls, the issue is almost certainly in the Twilio phone number configuration in the console.
